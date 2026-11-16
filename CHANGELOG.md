@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-17
+
+### Fixed
+
+- **Per-turn latency (fork):** Apply upstream PR #146 on top of the relocate patch: default endpoints are `[daily, prod]` (dead autopush removed), prewarm no longer blocks the turn, Gemini 3.8 Flash sends `thinkingConfig.thinkingLevel`, and live capacity routes are cached per account/project/model for 10 minutes so later turns skip the 429 walk.
+
 ## [0.14.0] - 2026-11-14
 
 ### Added
