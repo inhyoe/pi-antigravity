@@ -69,7 +69,13 @@ function declarations(request: ReturnType<typeof buildRequest>): string[] {
 }
 
 function systemText(request: ReturnType<typeof buildRequest>): string {
-  return (request.request.systemInstruction?.parts ?? []).map((part) => part.text).join("\n");
+  assert.equal(
+    (request.request.systemInstruction?.parts ?? []).map((part) => part.text).join("\n"),
+    "You are a coding agent.",
+  );
+  const firstUser = request.request.contents?.find((turn) => turn.role === "user");
+  const firstPart = firstUser?.parts?.[0];
+  return firstPart && "text" in firstPart ? firstPart.text : "";
 }
 
 const transcriptContext = {

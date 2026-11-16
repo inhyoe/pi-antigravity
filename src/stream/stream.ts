@@ -941,6 +941,10 @@ function mapToolChoiceMode(
 export function sanitizeSystemPrompt(text: string): string {
   return text
     .replace(
+      /Help users inspect files,\s*run commands,\s*and modify code\./gi,
+      "Assist users with inspecting files, running commands, and modifying code.",
+    )
+    .replace(
       /running inside pi-bolt,\s*a build of pi\s*\(a coding agent harness\)\s*compiled ahead of time/gi,
       "running inside your development environment",
     )
@@ -1018,11 +1022,23 @@ export function buildRequest(
     });
   }
 
+  // Relocate Pi instruction text to the first user turn and retain a minimal
+  // systemInstruction so the Antigravity proxy does not reject Pi prompts in
+  // the system slot with false 429 RESOURCE_EXHAUSTED responses.
+  const instructionText = systemParts.map((part) => part.text).join("\n\n");
+  if (instructionText.trim()) {
+    const firstUser = contents.find((turn) => turn.role === GeminiRole.User);
+    if (firstUser) {
+      firstUser.parts = [{ text: instructionText }, ...firstUser.parts];
+    } else {
+      contents.unshift({ role: GeminiRole.User, parts: [{ text: instructionText }] });
+    }
+  }
   const request: GeminiRequestBody = {
     contents,
     systemInstruction: {
       role: GeminiRole.User,
-      parts: systemParts,
+      parts: [{ text: "You are a coding agent." }],
     },
   };
 

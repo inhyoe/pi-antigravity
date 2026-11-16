@@ -1293,10 +1293,14 @@ const degradedPromptReq = buildRequest(
   {},
   geminiRuntime,
 );
-assert.equal(degradedPromptReq.request.systemInstruction.parts.length, 2);
+assert.equal(degradedPromptReq.request.systemInstruction.parts.length, 1);
+assert.equal(
+  degradedPromptReq.request.systemInstruction.parts[0]?.text,
+  "You are a coding agent.",
+);
 assert.match(
-  degradedPromptReq.request.systemInstruction.parts[1]?.text || "",
-  /never simulate tool calls/i,
+  degradedPromptReq.request.contents[0]?.parts[0]?.text || "",
+  /You are Pi\.\n\n[\s\S]*never simulate tool calls/i,
 );
 const lastDegradedTurn = degradedPromptReq.request.contents.at(-1);
 assert.equal(lastDegradedTurn?.role, "user");
@@ -1315,7 +1319,12 @@ const quotedMarkerRequest = buildRequest(
   geminiRuntime,
 );
 assert.equal(quotedMarkerRequest.request.systemInstruction.parts.length, 1);
+assert.equal(
+  quotedMarkerRequest.request.systemInstruction.parts[0]?.text,
+  "You are a coding agent.",
+);
 assert.deepEqual(quotedMarkerRequest.request.contents[0]?.parts, [
+  { text: "You are Pi." },
   { text: "Explain [Observation from a log]" },
 ]);
 
@@ -1502,6 +1511,14 @@ const convertedAborted = convertMessages(flash37Model, abortedContext, geminiRun
 assert.equal(convertedAborted.length, 1);
 assert.equal(convertedAborted[0]?.role, "user");
 
+function relocatedInstruction(req: ReturnType<typeof buildRequest>): string {
+  assert.equal(req.request.systemInstruction.parts.length, 1);
+  assert.equal(req.request.systemInstruction.parts[0]?.text, "You are a coding agent.");
+  const firstUser = req.request.contents.find((turn) => turn.role === "user");
+  const firstPart = firstUser?.parts[0];
+  return firstPart && "text" in firstPart ? firstPart.text : "";
+}
+
 const withPiPrompt = buildRequest(
   flash37Model,
   { ...dummyContext, systemPrompt: "You are Pi. Follow AGENTS.md." },
@@ -1509,8 +1526,7 @@ const withPiPrompt = buildRequest(
   {},
   "gemini-3.7-flash-low",
 );
-assert.equal(withPiPrompt.request.systemInstruction.parts.length, 1);
-assert.equal(withPiPrompt.request.systemInstruction.parts[0]?.text, "You are Pi. Follow AGENTS.md.");
+assert.equal(relocatedInstruction(withPiPrompt), "You are Pi. Follow AGENTS.md.");
 
 // Pi default prompt fingerprints that trigger false 429 RESOURCE_EXHAUSTED are neutralized (#137, #139).
 const defaultPiHarnessPrompt = buildRequest(
@@ -1525,8 +1541,8 @@ const defaultPiHarnessPrompt = buildRequest(
   "gemini-3.7-flash-low",
 );
 assert.equal(
-  defaultPiHarnessPrompt.request.systemInstruction.parts[0]?.text,
-  "You are a coding assistant running inside your development environment. Help users inspect files, run commands, and modify code.",
+  relocatedInstruction(defaultPiHarnessPrompt),
+  "You are a coding assistant running inside your development environment. Assist users with inspecting files, running commands, and modifying code.",
 );
 
 const shortPiPrompt = buildRequest(
@@ -1540,7 +1556,7 @@ const shortPiPrompt = buildRequest(
   "gemini-3.7-flash-low",
 );
 assert.equal(
-  shortPiPrompt.request.systemInstruction.parts[0]?.text,
+  relocatedInstruction(shortPiPrompt),
   "You are a coding assistant running inside your development environment. Be brief.",
 );
 
@@ -1555,7 +1571,7 @@ const unrelatedIdentifierPrompt = buildRequest(
   "gemini-3.7-flash-low",
 );
 assert.equal(
-  unrelatedIdentifierPrompt.request.systemInstruction.parts[0]?.text,
+  relocatedInstruction(unrelatedIdentifierPrompt),
   "Keep files running inside pi.js untouched.",
 );
 
@@ -1571,7 +1587,7 @@ for (const variant of [
     {},
     "gemini-3.7-flash-low",
   );
-  assert.ok(!/inside pi/i.test(res.request.systemInstruction.parts[0]?.text || ""), variant);
+  assert.ok(!/inside pi/i.test(relocatedInstruction(res)), variant);
 }
 
 const fallbackSystemPromptReq = buildRequest(
@@ -1582,20 +1598,16 @@ const fallbackSystemPromptReq = buildRequest(
   "gemini-3.7-flash-low",
 );
 assert.ok(
-  !/tool-aware\./i.test(fallbackSystemPromptReq.request.systemInstruction.parts[0]?.text || ""),
+  !/tool-aware\./i.test(relocatedInstruction(fallbackSystemPromptReq)),
   "default ANTIGRAVITY_SYSTEM_INSTRUCTION tail must also be neutralized",
 );
-assert.ok(
-  fallbackSystemPromptReq.request.systemInstruction.parts[0]?.text?.includes(
-    "practical, and tool aware.",
-  ),
-);
+assert.ok(relocatedInstruction(fallbackSystemPromptReq).includes("practical, and tool aware."));
 
 // Pi-Bolt default prompt ("inside Pi-Bolt, a build of pi (...)") must be neutralized the same way.
 const piBoltPromptCases: Array<[string, string]> = [
   [
     "You are a coding assistant running inside Pi-Bolt, a build of pi (a coding agent harness) compiled ahead of time. Help users inspect files, run commands, and modify code.",
-    "You are a coding assistant running inside your development environment. Help users inspect files, run commands, and modify code.",
+    "You are a coding assistant running inside your development environment. Assist users with inspecting files, running commands, and modifying code.",
   ],
   [
     "You are a coding assistant running inside Pi-Bolt. Be brief.",
@@ -1618,7 +1630,7 @@ for (const [input, expected] of piBoltPromptCases) {
     {},
     "gemini-3.7-flash-low",
   );
-  assert.equal(res.request.systemInstruction.parts[0]?.text, expected, input);
+  assert.equal(relocatedInstruction(res), expected, input);
 }
 
 const piBoltSubstringReq = buildRequest(
@@ -1631,14 +1643,11 @@ const piBoltSubstringReq = buildRequest(
   {},
   "gemini-3.7-flash-low",
 );
-assert.equal(
-  piBoltSubstringReq.request.systemInstruction.parts[0]?.text,
-  "inside your development environment",
-);
-assert.ok(!/inside pi/i.test(piBoltSubstringReq.request.systemInstruction.parts[0]?.text || ""));
+assert.equal(relocatedInstruction(piBoltSubstringReq), "inside your development environment");
+assert.ok(!/inside pi/i.test(relocatedInstruction(piBoltSubstringReq)));
 
 // Skill-only turns are injected instructions, not user prompts. The request remains
-// valid without inventing a user message, and the Skill is preserved as system context.
+// valid without inventing a user message, and the Skill is preserved in relocated instructions.
 const skillOnlyContext = {
   messages: [
     {
@@ -1657,14 +1666,14 @@ const skillOnlyRequest = buildRequest(
 );
 assert.equal(skillOnlyRequest.request.contents.length, 1);
 assert.equal(skillOnlyRequest.request.contents[0]?.role, "user");
-assert.equal(
-  skillOnlyRequest.request.contents[0]?.parts[0]?.text,
-  "Apply the active system instructions.",
+assert.ok(
+  relocatedInstruction(skillOnlyRequest).includes(
+    '<skill name="smart-commit-grouping">Group commits by intent.</skill>',
+  ),
 );
-assert.equal(skillOnlyRequest.request.systemInstruction.parts.length, 3);
 assert.equal(
-  skillOnlyRequest.request.systemInstruction.parts[2]?.text,
-  '<skill name="smart-commit-grouping">Group commits by intent.</skill>',
+  skillOnlyRequest.request.contents[0]?.parts[1]?.text,
+  "Apply the active system instructions.",
 );
 
 const systemOnlyRequest = buildRequest(
@@ -1674,10 +1683,10 @@ const systemOnlyRequest = buildRequest(
   {},
   "gemini-3.7-flash-low",
 );
-assert.equal(systemOnlyRequest.request.contents[0]?.parts[0]?.text, "Apply the active system instructions.");
+assert.equal(relocatedInstruction(systemOnlyRequest), "Follow the repository conventions.");
 assert.equal(
-  systemOnlyRequest.request.systemInstruction.parts[0]?.text,
-  "Follow the repository conventions.",
+  systemOnlyRequest.request.contents[0]?.parts[1]?.text,
+  "Apply the active system instructions.",
 );
 
 const skillAndUserContext = {
@@ -1697,11 +1706,12 @@ const skillAndUserRequest = buildRequest(
   {},
   "gemini-3.7-flash-low",
 );
-assert.equal(skillAndUserRequest.request.contents[0]?.parts[0]?.text, " Commit the staged changes.");
-assert.equal(
-  skillAndUserRequest.request.systemInstruction.parts[2]?.text,
-  '<skill name="smart-commit-grouping">Group commits by intent.</skill>',
+assert.ok(
+  relocatedInstruction(skillAndUserRequest).includes(
+    '<skill name="smart-commit-grouping">Group commits by intent.</skill>',
+  ),
 );
+assert.equal(skillAndUserRequest.request.contents[0]?.parts[1]?.text, " Commit the staged changes.");
 
 // Tool-result-only turns also need no synthetic user text.
 const toolResultOnlyContext = {
@@ -1735,8 +1745,7 @@ assert.ok(
 );
 
 const fallbackPersona = buildRequest(flash37Model, dummyContext, "test-proj", {}, "gemini-3.7-flash-low");
-assert.equal(fallbackPersona.request.systemInstruction.parts.length, 2);
-assert.match(fallbackPersona.request.systemInstruction.parts[0]?.text || "", /You are Antigravity/);
+assert.match(relocatedInstruction(fallbackPersona), /You are Antigravity/);
 
 // Models carry their own published list price, not one shared placeholder.
 const flashCost = ANTIGRAVITY_MODELS.find((m) => m.id === "gemini-3.7-flash")?.cost;
