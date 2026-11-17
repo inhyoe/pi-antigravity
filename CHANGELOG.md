@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-11-17
+
+### Fixed
+
+- **Cached capacity route recovery (fork):** Address the five coderabbit comments on upstream PR #146. The cached probe slot no longer hides a working route from the normal candidate chain, a route is remembered only after its stream completes, a cached route whose stream fails is evicted, a cached probe whose error body cannot be read still falls through to the normal chain, and `ANTIGRAVITY_PREWARM` is documented. Tests also clear the `NOAGY_` aliases.
+
 ## [0.14.2] - 2026-11-17
 
 ### Changed

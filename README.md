@@ -12,6 +12,7 @@
 | Relocate system instructions | Pi's system prompt moves into the first user turn. `systemInstruction` keeps only `You are a coding agent.` | 0.14.0 | `6b26e28` |
 | Package scope | Published as `@inhyoe/pi-antigravity`, so `pi update` keeps these patches. | 0.14.0 | `6b26e28` |
 | Per-turn latency | Applies upstream [PR #146](https://github.com/Rahularya01/pi-antigravity/pull/146). Endpoints are `[daily, prod]`, prewarm no longer blocks, Gemini 3.8 Flash sends `thinkingLevel`, and live capacity routes are cached for 10 minutes. | 0.14.1 | `c6c2ff2` |
+| Cached route recovery | Fixes the 5 review comments on PR #146. A route is remembered only after its stream succeeds, and a failing cached route is dropped so the normal chain still runs in the same turn. | 0.14.3 | `c1436bf` |
 
 ### Result
 
