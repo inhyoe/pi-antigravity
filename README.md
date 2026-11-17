@@ -1,3 +1,33 @@
+# @inhyoe/pi-antigravity
+
+> **Fork of [`pi-antigravity`](https://www.npmjs.com/package/pi-antigravity) 0.14.0.**
+> Source: [inhyoe/pi-antigravity](https://github.com/inhyoe/pi-antigravity).
+> The "Fork changes" section lists what this fork changes. The rest of this README is the upstream text, except the package name in Install.
+
+## Fork changes
+
+| Change | What it does | Version | Commit |
+| --- | --- | --- | --- |
+| Neutralize Pi-Bolt prompt | `sanitizeSystemPrompt` rewrites Pi-Bolt's default identity sentence, which drew false `429 RESOURCE_EXHAUSTED`. | 0.14.0 | `62647ab` |
+| Relocate system instructions | Pi's system prompt moves into the first user turn. `systemInstruction` keeps only `You are a coding agent.` | 0.14.0 | `6b26e28` |
+| Package scope | Published as `@inhyoe/pi-antigravity`, so `pi update` keeps these patches. | 0.14.0 | `6b26e28` |
+| Per-turn latency | Applies upstream [PR #146](https://github.com/Rahularya01/pi-antigravity/pull/146). Endpoints are `[daily, prod]`, prewarm no longer blocks, Gemini 3.8 Flash sends `thinkingLevel`, and live capacity routes are cached for 10 minutes. | 0.14.1 | `c6c2ff2` |
+
+### Result
+
+`antigravity/gemini-3.8-flash`, thinking `high`, measured from session logs and live calls:
+
+| Build | Output tokens | Turn duration |
+| --- | --- | --- |
+| 0.14.0 (2026-11-16 subagent turns) | 48 | 60.5 s |
+| 0.14.0 (2026-11-16 subagent turns) | 64 | 105.7 s |
+| 0.14.0 (2026-11-16 subagent turns) | 100 | 143.5 s |
+| 0.14.1 (2026-11-17, 3 new Pi-Bolt processes, read tool + answer) | 422 to 541 (thinking included) | 6.9 to 7.8 s |
+
+One first turn on 0.14.1 took 31.8 s; the other five turns took 6.9 to 7.8 s. All six turns ended with `stopReason: stop` or `toolUse` and the expected answer.
+
+---
+
 # pi-antigravity
 
 [![npm version](https://img.shields.io/npm/v/pi-antigravity?logo=npm)](https://www.npmjs.com/package/pi-antigravity)
@@ -39,7 +69,7 @@ Want to equip Pi with MCP, web access, subagents, and todos? Install [`pi-essent
 Install from npm:
 
 ```bash
-pi install npm:pi-antigravity
+pi install npm:@inhyoe/pi-antigravity
 ```
 
 Or install the latest repository version:
@@ -50,7 +80,7 @@ pi install git:github.com/Rahularya01/pi-antigravity
 
 On Oh My Pi, install the same package with `omp plugin install npm:pi-antigravity`.
 
-Restart Pi (or run `/reload`) after installation. To update the npm package later, use `pi update npm:pi-antigravity`.
+Restart Pi (or run `/reload`) after installation. To update the npm package later, use `pi update npm:@inhyoe/pi-antigravity`.
 
 ## Quick start
 
