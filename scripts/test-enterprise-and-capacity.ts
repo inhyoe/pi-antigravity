@@ -33,6 +33,8 @@ const saved = {
   TIER: process.env.ANTIGRAVITY_USER_TIER,
   BASE_URL: process.env.ANTIGRAVITY_BASE_URL,
   RUNTIME_MODEL: process.env.ANTIGRAVITY_RUNTIME_MODEL,
+  NOAGY_BASE_URL: process.env.NOAGY_BASE_URL,
+  NOAGY_RUNTIME_MODEL: process.env.NOAGY_RUNTIME_MODEL,
 };
 process.env.HOME = home;
 process.env.USERPROFILE = home;
@@ -43,6 +45,8 @@ delete process.env.ANTIGRAVITY_ENTERPRISE_PROJECT;
 delete process.env.ANTIGRAVITY_USER_TIER;
 delete process.env.ANTIGRAVITY_BASE_URL;
 delete process.env.ANTIGRAVITY_RUNTIME_MODEL;
+delete process.env.NOAGY_BASE_URL;
+delete process.env.NOAGY_RUNTIME_MODEL;
 
 assert.equal(resolveEnterpriseTarget(), undefined);
 process.env.ANTIGRAVITY_LOCATION = "eu";
@@ -434,6 +438,117 @@ try {
   assert.equal(acctCalls[0]?.model, "gemini-3.8-flash-medium");
   clearCapacityRouteCache();
 
+  // Scenario 1 (F2): cached medium@daily fails, high generic-429s on both
+  // endpoints, but medium@prod works — the standard chain must still offer
+  // medium even though the probe slot already used that runtime id.
+  clearCapacityRouteCache();
+  rememberCapacityRoute(transportRouteKey, "gemini-3.8-flash-medium", "https://daily-cloudcode-pa.googleapis.com");
+  const s1Calls: { url: string; model?: string }[] = [];
+  globalThis.fetch = (async (url, init) => {
+    const payload = JSON.parse(String(init?.body)) as { model?: string };
+    s1Calls.push({ url: String(url), model: payload.model });
+    if (payload.model === "gemini-3.8-flash-medium" && String(url).startsWith("https://cloudcode-pa.googleapis.com/")) {
+      return okSse("prod-medium");
+    }
+    return generic429();
+  }) as typeof fetch;
+  const s1 = await streamAntigravity(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, { ...options, sessionId: "sess-s1", reasoning: "high" as const }).result();
+  assert.equal(s1.stopReason, "stop", s1.errorMessage);
+  assert.equal(s1Calls[0]?.model, "gemini-3.8-flash-medium", "scenario1 first call is cached probe");
+  assert.match(s1Calls[0]?.url || "", /^https:\/\/daily-cloudcode-pa\.googleapis\.com\//);
+  assert.equal(s1Calls.at(-1)?.model, "gemini-3.8-flash-medium", `scenario1 should recover via medium@prod, saw ${JSON.stringify(s1Calls)}`);
+  assert.match(s1Calls.at(-1)?.url || "", /^https:\/\/cloudcode-pa\.googleapis\.com\//);
+  clearCapacityRouteCache();
+
+  const sseError = () =>
+    new Response('data: {"error":{"code":503,"message":"No capacity available","status":"UNAVAILABLE"}}\n\n');
+
+  // Scenario 2 (F3): medium returns HTTP 200 but an SSE error — its route
+  // must not be remembered, so the next turn starts on high again.
+  clearCapacityRouteCache();
+  const s2Calls: { model?: string }[] = [];
+  globalThis.fetch = (async (url, init) => {
+    const payload = JSON.parse(String(init?.body)) as { model?: string };
+    s2Calls.push({ model: payload.model });
+    return payload.model === "gemini-3.8-flash-medium" ? sseError() : generic429();
+  }) as typeof fetch;
+  const s2 = await streamAntigravity(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, { ...options, sessionId: "sess-s2", reasoning: "high" as const }).result();
+  assert.equal(s2.stopReason, "error", `scenario2 SSE error turn should fail, saw ${s2.stopReason}`);
+  assert.equal(rememberedCapacityRoute(transportRouteKey), undefined, "scenario2 SSE-error route must not be cached");
+  s2Calls.length = 0;
+  globalThis.fetch = (async (url, init) => {
+    const payload = JSON.parse(String(init?.body)) as { model?: string };
+    s2Calls.push({ model: payload.model });
+    return okSse("next");
+  }) as typeof fetch;
+  const s2Next = await streamAntigravity(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, { ...options, sessionId: "sess-s2-next", reasoning: "high" as const }).result();
+  assert.equal(s2Next.stopReason, "stop", s2Next.errorMessage);
+  assert.equal(s2Calls[0]?.model, "gemini-3.8-flash-high", "scenario2 next turn must start on initial runtime");
+  clearCapacityRouteCache();
+
+  // Scenario 3 (F3 invalidate): a remembered probe that 200s then SSE-errors
+  // must evict its cached route.
+  rememberCapacityRoute(transportRouteKey, "gemini-3.8-flash-medium", "https://daily-cloudcode-pa.googleapis.com");
+  globalThis.fetch = (async (url, init) => {
+    const payload = JSON.parse(String(init?.body)) as { model?: string };
+    return payload.model === "gemini-3.8-flash-medium" ? sseError() : okSse("high");
+  }) as typeof fetch;
+  const s3 = await streamAntigravity(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, { ...options, sessionId: "sess-s3", reasoning: "high" as const }).result();
+  assert.equal(s3.stopReason, "error", `scenario3 probe SSE error should fail the turn, saw ${s3.stopReason}`);
+  assert.equal(rememberedCapacityRoute(transportRouteKey), undefined, "scenario3 cached route must be invalidated on stream failure");
+  clearCapacityRouteCache();
+
+  // Scenario 4 (F4): cached probe 503s and its body read throws — the turn
+  // must continue to the initial runtime and the cache must be evicted.
+  rememberCapacityRoute(transportRouteKey, "gemini-3.8-flash-medium", "https://daily-cloudcode-pa.googleapis.com");
+  const s4Calls: { url: string; model?: string }[] = [];
+  globalThis.fetch = (async (url, init) => {
+    const payload = JSON.parse(String(init?.body)) as { model?: string };
+    s4Calls.push({ url: String(url), model: payload.model });
+    if (payload.model === "gemini-3.8-flash-medium") {
+      return new Response(
+        new ReadableStream({ pull(controller) { controller.error(new Error("body read failed")); } }),
+        { status: 503 },
+      );
+    }
+    return payload.model === "gemini-3.8-flash-high" ? okSse("recovered") : generic429();
+  }) as typeof fetch;
+  const s4 = await streamAntigravity(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, { ...options, sessionId: "sess-s4", reasoning: "high" as const }).result();
+  assert.equal(s4.stopReason, "stop", s4.errorMessage);
+  assert.equal(s4Calls.length, 2, `scenario4 should probe then recover on high, saw ${JSON.stringify(s4Calls)}`);
+  assert.equal(s4Calls[1]?.model, "gemini-3.8-flash-high");
+  assert.equal(rememberedCapacityRoute(transportRouteKey), undefined, "scenario4 cached route must be evicted");
+  clearCapacityRouteCache();
+
+  // Scenario 5 (regression): normal walk high 429 -> medium 200 STOP still
+  // remembers the route; caller abort still propagates without fallback.
+  const s5Calls: { model?: string }[] = [];
+  globalThis.fetch = (async (url, init) => {
+    const payload = JSON.parse(String(init?.body)) as { model?: string };
+    s5Calls.push({ model: payload.model });
+    return payload.model === "gemini-3.8-flash-medium" ? okSse("walk") : generic429();
+  }) as typeof fetch;
+  const s5 = await streamAntigravity(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, { ...options, sessionId: "sess-s5", reasoning: "high" as const }).result();
+  assert.equal(s5.stopReason, "stop", s5.errorMessage);
+  assert.deepEqual(rememberedCapacityRoute(transportRouteKey), { runtimeModel: "gemini-3.8-flash-medium", endpoint: "https://daily-cloudcode-pa.googleapis.com" }, "scenario5 successful walk must be remembered");
+  s5Calls.length = 0;
+  const s5Next = await streamAntigravity(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, { ...options, sessionId: "sess-s5-next", reasoning: "high" as const }).result();
+  assert.equal(s5Next.stopReason, "stop", s5Next.errorMessage);
+  assert.equal(s5Calls[0]?.model, "gemini-3.8-flash-medium", "scenario5 next turn must start on remembered route");
+  clearCapacityRouteCache();
+  const abortController = new AbortController();
+  let abortFetches = 0;
+  globalThis.fetch = (async () => {
+    abortFetches += 1;
+    abortController.abort();
+    throw new Error("caller cancelled");
+  }) as typeof fetch;
+  const s5Abort = await streamAntigravity(model, { messages: [{ role: "user", content: "hi", timestamp: 1 }] }, { ...options, sessionId: "sess-s5-abort", reasoning: "high" as const, signal: abortController.signal }).result();
+  assert.equal(s5Abort.stopReason, "aborted", `scenario5 caller abort must propagate, saw ${s5Abort.stopReason}: ${s5Abort.errorMessage}`);
+  assert.match(s5Abort.errorMessage || "", /caller cancelled/);
+  assert.equal(abortFetches, 1, "scenario5 caller abort must not fall through to other endpoints");
+  clearCapacityRouteCache();
+
   // Deterministic TTL expiry and 64-entry FIFO cap.
   clearCapacityRouteCache();
   rememberCapacityRoute("k", "m", "e", 1000);
@@ -457,6 +572,8 @@ try {
     ANTIGRAVITY_USER_TIER: saved.TIER,
     ANTIGRAVITY_BASE_URL: saved.BASE_URL,
     ANTIGRAVITY_RUNTIME_MODEL: saved.RUNTIME_MODEL,
+    NOAGY_BASE_URL: saved.NOAGY_BASE_URL,
+    NOAGY_RUNTIME_MODEL: saved.NOAGY_RUNTIME_MODEL,
   })) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;

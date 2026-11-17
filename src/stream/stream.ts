@@ -1764,7 +1764,10 @@ export function resolveCapacityCandidates(
   // endpoint list in the same turn.
   runtimeCandidates.push(initialRuntimeModel);
   const fallback = getFallbackRuntimeModel(initialRuntimeModel, effort);
-  if (fallback && !runtimeCandidates.includes(fallback)) {
+  // The cached probe slot (index 0) is not a normal candidate: excluding it
+  // from de-duplication keeps its runtime reachable via the standard chain.
+  const normalCandidates = hasCachedProbe ? runtimeCandidates.slice(1) : runtimeCandidates;
+  if (fallback && !normalCandidates.includes(fallback)) {
     runtimeCandidates.push(fallback);
   }
   return { routeKey, cachedRoute, hasCachedProbe, maxRuntimeCandidates, runtimeCandidates };
@@ -1862,6 +1865,8 @@ export function streamAntigravity(
       let lastText = "";
       let received = false;
       let runtimeModel = initialRuntimeModel;
+      let pendingRoute: { routeKey: string; runtimeModel: string; endpoint: string } | undefined;
+      let responseViaCachedProbe = false;
 
       for (let emptyAttempt = 0; emptyAttempt <= 2; emptyAttempt++) {
         if (opts.signal?.aborted) throw new Error("Request was aborted");
@@ -1939,17 +1944,21 @@ export function streamAntigravity(
             }
             setLastStatus(response.status);
             if (response.ok) {
-              if (
+              responseViaCachedProbe = isCachedProbe;
+              pendingRoute =
                 allowCapacityCache &&
                 (runtimeModel !== initialRuntimeModel || endpoint !== defaultFirstEndpoint)
-              ) {
-                rememberCapacityRoute(routeKey, runtimeModel, endpoint);
-              }
+                  ? { routeKey, runtimeModel, endpoint }
+                  : undefined;
               break;
             }
             if (isCachedProbe) {
-              lastText = await response.text();
               preferredCapacityRoutes.delete(routeKey);
+              try {
+                lastText = await response.text();
+              } catch {
+                lastText = "";
+              }
               break;
             }
             lastText = await response.text();
@@ -1981,7 +1990,7 @@ export function streamAntigravity(
               );
               if (
                 dynamic?.id &&
-                !runtimeCandidates.includes(dynamic.id) &&
+                !runtimeCandidates.slice(hasCachedProbe ? 1 : 0).includes(dynamic.id) &&
                 isUsableRuntimeModelId(dynamic.id)
               ) {
                 runtimeCandidates.push(dynamic.id);
@@ -1991,7 +2000,7 @@ export function streamAntigravity(
           }
           if (response?.status === 429 && isGenericResourceExhausted(lastText)) {
             const nextSibling = advertisedSiblingRuntimes(runtimeModel).find(
-              (id) => !runtimeCandidates.includes(id),
+              (id) => !runtimeCandidates.slice(hasCachedProbe ? 1 : 0).includes(id),
             );
             if (nextSibling && runtimeCandidates.length < maxRuntimeCandidates) {
               // Same-generation tiers before a cross-generation compatibility fallback.
@@ -2087,10 +2096,25 @@ export function streamAntigravity(
         };
         output.stopReason = "stop";
 
-        received = await streamResponse(response, stream, output, model);
+        try {
+          received = await streamResponse(response, stream, output, model);
+        } catch (error) {
+          if (responseViaCachedProbe) preferredCapacityRoutes.delete(routeKey);
+          throw error;
+        }
         if (received) break;
+        if (responseViaCachedProbe) preferredCapacityRoutes.delete(routeKey);
       }
 
+      if (received) {
+        if (output.stopReason !== "error" && output.stopReason !== "aborted") {
+          if (pendingRoute) {
+            rememberCapacityRoute(pendingRoute.routeKey, pendingRoute.runtimeModel, pendingRoute.endpoint);
+          }
+        } else if (output.stopReason === "error" && responseViaCachedProbe) {
+          preferredCapacityRoutes.delete(routeKey);
+        }
+      }
       if (!received) throw new Error("Antigravity API returned an empty response");
       setLastLatencyMs(Date.now() - startTime);
       if (output.stopReason === "error" || output.stopReason === "aborted") {

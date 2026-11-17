@@ -270,6 +270,7 @@ All primary environment variables start with `ANTIGRAVITY_`. The legacy `NOAGY_`
 | `ANTIGRAVITY_STREAM_STALL_TIMEOUT_MS` | Maximum silence between stream chunks; default `300000` ms. Set `0` to disable. |
 | `ANTIGRAVITY_STREAM_HEADER_TIMEOUT_MS` | Response-header deadline; default `180000` ms. Set `0` to disable. |
 | `ANTIGRAVITY_NO_KEEPALIVE` | Set to `1` to skip the keep-alive connection pool. |
+| `ANTIGRAVITY_PREWARM` | Disabled by default. Set to `1` to make a TLS pre-warm request on the first Antigravity request. `ANTIGRAVITY_NO_PREWARM=1` takes precedence and disables it. |
 | `ANTIGRAVITY_NO_PREWARM` | Set to `1` to skip the TLS pre-warm request made on the first Antigravity request. |
 | `ANTIGRAVITY_NO_EXTRA_TOOLS` | Set to `1` to stop registering the model-facing `google_search`, `read_url_content`, and `generate_image` tools. The `/antigravity.search`, `/antigravity.fetch`, and `/antigravity.image` commands stay available. |
 | `ANTIGRAVITY_USE_CREDITS` | Set to `1` (or `0`) to explicitly enable (or disable) automatic AI credit overages when standard quota is depleted. Defaults to inheriting `useG1Credits` from `~/.gemini/antigravity-cli/settings.json` only when that file sets the flag. Otherwise credit overages stay off. |
